@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="templates/noodles.png">
+    <title>Natasha's Kitchen v.1.0</title>
+    <style>
+        :root {
+            --primary: #b30000;
+            --secondary: #b30000;
+            --bg: #FFFFFF;
+            --card: #FFFFFF;
+            --text: #000000;
+            --accent: #ff0000;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: var(--primary);
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+        }
+
+        .search-container {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .count-container {
+            text-align: center;
+            font-size: 1.2rem;
+            color: #666;
+        }
+
+        .search-input {
+            padding: 10px 15px;
+            border: 2px solid var(--secondary);
+            border-radius: 25px;
+            font-size: 1rem;
+            width: 250px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus {
+            border-color: var(--primary);
+        }
+
+        .btn {
+            padding: 10px 25px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .btn-secondary {
+            background-color: var(--secondary);
+        }
+
+        .btn-accent {
+            background-color: var(--accent);
+        }
+
+        .btn2 {
+            float: right;
+        }
+
+        .recipe-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 25px;
+            padding: 20px 0;
+            min-height: 200px;
+        }
+
+        .recipe-grid:empty {
+            display: none;
+        }
+
+        .recipe-card {
+            background: var(--card);
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+            cursor: pointer;
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .recipe-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 12px 24px rgba(0,0,0,0.15);
+        }
+
+        .recipe-img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-bottom: 3px solid var(--primary);
+        }
+
+        .recipe-info {
+            padding: 15px;
+        }
+
+        .recipe-title {
+            font-size: 1.2rem;
+            color: var(--primary);
+            margin-bottom: 8px;
+            line-height: 1.3;
+        }
+
+        .recipe-cat {
+            padding: 15px;
+            font-size: 0.9rem;
+            color: #666;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .recipe-preview {
+            font-size: 0.9rem;
+            color: #666;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .recipe-link {
+            display: inline-block;
+            margin-top: 10px;
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+
+        .recipe-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Loading indicator */
+        .loading-container {
+            text-align: center;
+            padding: 40px 20px;
+            display: none;
+        }
+
+        .loading-container.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #666;
+            font-size: 1rem;
+        }
+
+        /* Error message */
+        .error-message {
+            text-align: center;
+            padding: 40px 20px;
+            color: #c00;
+            display: none;
+        }
+
+        .error-message.active {
+            display: block;
+        }
+
+        .error-message button {
+            margin-top: 15px;
+            padding: 10px 25px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+        }
+
+        /* Modal/Overlay styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--card);
+            border-radius: 20px;
+            max-width: 800px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(50px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .modal-header {
+            position: relative;
+        }
+
+        .modal-img {
+            width: 100%;
+            max-height: 300px;
+            object-fit: cover;
+            border-radius: 20px 20px 0 0;
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(255,255,255,0.9);
+            border: none;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            font-size: 1.5rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .close-btn:hover {
+            background: white;
+        }
+
+        .modal-body {
+            padding: 25px;
+        }
+
+        .modal-title {
+            font-size: 1.8rem;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+
+        .modal-section {
+            margin-bottom: 25px;
+        }
+
+        .modal-section h3 {
+            color: var(--secondary);
+            margin-bottom: 10px;
+            font-size: 1.2rem;
+        }
+
+        .ingredients-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .ingredients-list li {
+            padding: 8px 12px;
+            margin-bottom: 5px;
+            background: var(--bg);
+            border-radius: 8px;
+            border-left: 4px solid var(--accent);
+        }
+
+        .instruction-step {
+            padding: 12px 15px;
+            margin-bottom: 12px;
+            background: var(--bg);
+            border-radius: 10px;
+            border-left: 4px solid var(--primary);
+        }
+
+        .instruction-step strong {
+            color: var(--primary);
+            margin-right: 8px;
+        }
+
+        .modal-footer {
+            padding: 15px 25px;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+            font-size: 1.2rem;
+        }
+
+        @media (max-width: 600px) {
+            .search-input { width: 200px; }
+            .btn { padding: 8px 16px; }
+            h1 { font-size: 1.8rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Natasha's Kitchen</h1>
+        <div class="btn2">
+            <button class="btn btn-secondary" onclick="window.open('https://www.paypal.com/donate/?hosted_button_id=JJ2KF3GDK9C38', '_blank')">Donate</button>
+        </div>
+        <div class="search-container">
+            <input type="text" id="searchName" class="search-input" placeholder="Search by recipe name...">
+            <input type="text" id="searchIngredients" class="search-input" placeholder="Search by ingredient...">
+            <input type="text" id="searchCategory" class="search-input" placeholder="Search by category...">
+            <input type="text" id="searchOrigin" class="search-input" placeholder="Search by origin...">
+            <button class="btn btn-secondary" onclick="clearSearch()">Clear</button>
+        </div>
+
+        <!-- Recipe Count -->
+        <div>
+            <div id="reccount" class="count-container"></div>
+        </div>
+    </header>
+
+    <main>
+        <div id="recipeGrid" class="recipe-grid"></div>
+        <div id="noResults" class="no-results" style="display: none;">
+            <p>No recipes found matching your search.</p>
+        </div>
+        <div id="errorMessage" class="error-message">
+            <p>Failed to load recipes. Please try again.</p>
+            <button onclick="retryLoad()">Retry</button>
+        </div>
+        <div id="loadingIndicator" class="loading-container">
+            <div class="spinner"></div>
+            <p class="loading-text">Loading recipes...</p>
+        </div>
+    </main>
+
+    <!-- Recipe Detail Modal -->
+    <div id="recipeModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <img id="modalImg" class="modal-img" src="" alt="Recipe Image">
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <h2 id="modalTitle" class="modal-title"></h2>
+                <h4 id="modalOrigin" class="modal-section"></h4>
+                <h3 id="modalCat" class="modal-section"></h3>
+
+                <div class="modal-section">
+                    <h3>Ingredients</h3>
+                    <ul id="ingredientsList" class="ingredients-list"></ul>
+                </div>
+
+                <div class="modal-section">
+                    <h3>Instructions</h3>
+                    <div id="instructionList"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <a id="originalLink" target="_blank" class="btn">View on natashaskitchen.com</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State management
+        let allRecipes = [];           // All loaded recipes
+        let currentRecipe = null;
+        let currentOffset = 0;          // Current pagination offset
+        let currentLimit = 50;          // Recipes per page
+        let totalCount = 0;             // Total matching recipes
+        let isLoading = false;          // Prevent concurrent loads
+        let hasMore = true;             // More recipes available
+        let searchParams = {            // Current search filters
+            name: '',
+            ingredients: '',
+            category: '',
+            origin: ''
+        };
+
+        const grid = document.getElementById('recipeGrid');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const noResults = document.getElementById('noResults');
+        const countContainer = document.getElementById('reccount');
+
+        // Debounced scroll handler for infinite scroll
+        let scrollTimeout = null;
+        function handleScroll() {
+            if (isLoading || !hasMore) return;
+
+            // Use documentElement for more reliable scroll height
+            const scrollPosition = window.scrollY + window.innerHeight;
+            const pageHeight = Math.max(
+                document.body.scrollHeight,
+                document.documentElement.scrollHeight,
+                document.body.offsetHeight,
+                document.documentElement.offsetHeight
+            );
+
+            // Load when within 300px of bottom
+            if (pageHeight - scrollPosition <= 300) {
+                loadMoreRecipes();
+            }
+        }
+
+        // Throttled scroll listener
+        window.addEventListener('scroll', () => {
+            if (scrollTimeout) {
+                clearTimeout(scrollTimeout);
+            }
+            scrollTimeout = setTimeout(handleScroll, 50);  // Check every 50ms max
+        });
+
+        // Load initial recipes or apply search
+        async function loadRecipes(reset = true) {
+            if (reset) {
+                currentOffset = 0;
+                allRecipes = [];
+                hasMore = true;
+                grid.innerHTML = '';
+            }
+            await loadMoreRecipes();
+        }
+
+        // Load next batch from API
+        async function loadMoreRecipes() {
+            if (isLoading || !hasMore) return;
+
+            isLoading = true;
+            loadingIndicator.classList.add('active');
+            updateLoadingText();
+
+            try {
+                const url = '/api/recipes?' +
+                    'name=' + encodeURIComponent(searchParams.name) +
+                    '&ingredients=' + encodeURIComponent(searchParams.ingredients) +
+                    '&category=' + encodeURIComponent(searchParams.category) +
+                    '&origin=' + encodeURIComponent(searchParams.origin) +
+                    '&offset=' + currentOffset +
+                    '&limit=' + currentLimit;
+
+                const resp = await fetch(url);
+
+                if (!resp.ok) {
+                    throw new Error(`HTTP error! status: ${resp.status}`);
+                }
+
+                const data = await resp.json();
+
+                totalCount = data.count;
+                const newRecipes = data.recipes;
+
+                if (newRecipes.length === 0) {
+                    hasMore = false;
+                } else {
+                    appendRecipes(newRecipes);
+                    currentOffset += newRecipes.length;
+                    hasMore = currentOffset < totalCount;
+                }
+
+                updateUI();
+
+            } catch (error) {
+                console.error('Error loading recipes:', error);
+                showError();
+            } finally {
+                isLoading = false;
+                loadingIndicator.classList.remove('active');
+                // Check if we should load more immediately (user still at bottom)
+                handleScroll();
+            }
+        }
+
+        // Update loading indicator text with progress
+        function updateLoadingText() {
+            const loaded = currentOffset;
+            const total = totalCount || '?';
+            const textEl = loadingIndicator.querySelector('.loading-text');
+            if (textEl) {
+                if (hasMore) {
+                    textEl.textContent = `Loading recipes... (${loaded} / ${total})`;
+                } else {
+                    textEl.textContent = `All ${total} recipes loaded`;
+                }
+            }
+        }
+
+        // Show error message
+        function showError() {
+            const errorEl = document.getElementById('errorMessage');
+            errorEl.classList.add('active');
+        }
+
+        function retryLoad() {
+            const errorEl = document.getElementById('errorMessage');
+            errorEl.classList.remove('active');
+            loadMoreRecipes();
+        }
+
+        // Append recipes to grid (no full re-render)
+        function appendRecipes(recipes) {
+            const startIndex = allRecipes.length;
+            allRecipes = allRecipes.concat(recipes);
+
+            const fragment = document.createDocumentFragment();
+            recipes.forEach((r, i) => {
+                const card = createRecipeCard(r, startIndex + i);
+                fragment.appendChild(card);
+            });
+            grid.appendChild(fragment);
+        }
+
+        function stripClean(text) {
+            let fname = text.replaceAll(" ", "_")
+            fname = fname.replaceAll("%", "--PCENT--")
+            fname = fname.replaceAll("&", "--AND--")
+            return fname
+        }
+
+        // Create a single recipe card element
+        function createRecipeCard(r, index) {
+            const card = document.createElement('div');
+            card.className = 'recipe-card';
+            card.onclick = () => openRecipe(index);
+
+            let imgSrc = (r.name && r.name !== 'null' && r.name !== 'None') ? 'output/thumbs/' + stripClean(r.name) : 'templates/noimage.jpg';
+
+            // Ensure origin is not null
+            if (r.origin === null) r.origin = "";
+
+            const preview = (r.instructions && r.instructions[0]) || '';
+
+            card.innerHTML = `
+                <img class="recipe-img" src="${stripClean(imgSrc)}.webp" alt="${r.name}" loading="lazy">
+                <div class="recipe-info">
+                    <h3 class="recipe-title">${r.name}</h3>
+                    <p class="recipe-preview">${preview}</p>
+                </div>
+                <h4 class="recipe-cat">${r.origin}<br /><br />${r.category}</h4>
+            `;
+            return card;
+        }
+
+        // Update UI state (count, no results)
+        function updateUI() {
+            countContainer.innerHTML = `Recipes: ${totalCount}`;
+            updateLoadingText();
+
+            if (totalCount === 0) {
+                noResults.style.display = 'block';
+                grid.style.display = 'none';
+            } else {
+                noResults.style.display = 'none';
+                grid.style.display = 'grid';
+            }
+        }
+
+        // Open recipe modal
+        function openRecipe(index) {
+            currentRecipe = allRecipes[index];
+
+            document.getElementById('modalTitle').textContent = currentRecipe.name;
+            document.getElementById('modalOrigin').textContent = currentRecipe.origin;
+            document.getElementById('modalCat').textContent = currentRecipe.category;
+
+            const modalImg = document.getElementById('modalImg');
+            if (currentRecipe.image === null || currentRecipe.image === 'output/images/null' || currentRecipe.image === 'output/images/None') {
+                modalImg.src = 'templates/noimage.jpg';
+            } else {
+                modalImg.src = 'output/images/' + stripClean(currentRecipe.name) + ".webp";
+            }
+
+            document.getElementById('originalLink').href = currentRecipe.url;
+
+            // Ingredients
+            const ingList = document.getElementById('ingredientsList');
+            ingList.innerHTML = currentRecipe.ingredients.map(i => '<li>' + i + '</li>').join('');
+
+            // Instructions
+            const instList = document.getElementById('instructionList');
+            instList.innerHTML = currentRecipe.instructions.map((step, i) =>
+                '<div class="instruction-step"><strong>Step ' + (i+1) + ':</strong> ' + step + '</div>'
+            ).join('');
+
+            document.getElementById('recipeModal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('recipeModal').classList.remove('active');
+        }
+
+        // Close modal on outside click
+        document.getElementById('recipeModal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+
+        // Perform search with reset
+        function search() {
+            searchParams.name = document.getElementById('searchName').value;
+            searchParams.ingredients = document.getElementById('searchIngredients').value;
+            searchParams.category = document.getElementById('searchCategory').value;
+            searchParams.origin = document.getElementById('searchOrigin').value;
+            loadRecipes(true);
+        }
+
+        // Debounced live search
+        let searchTimeout = null;
+        function liveSearch() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(search, 300);
+        }
+
+        function clearSearch() {
+            document.getElementById('searchName').value = '';
+            document.getElementById('searchIngredients').value = '';
+            document.getElementById('searchCategory').value = '';
+            document.getElementById('searchOrigin').value = '';
+            searchParams = { name: '', ingredients: '', category: '', origin: '' };
+            loadRecipes(true);
+        }
+
+        // Live search event listeners
+        document.getElementById('searchName').addEventListener('input', liveSearch);
+        document.getElementById('searchIngredients').addEventListener('input', liveSearch);
+        document.getElementById('searchCategory').addEventListener('input', liveSearch);
+        document.getElementById('searchOrigin').addEventListener('input', liveSearch);
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeModal();
+        });
+
+        // Initialize after DOM loads
+        document.addEventListener('DOMContentLoaded', () => {
+            // Scroll listener already attached globally
+            // Start initial load
+            loadRecipes(true);
+        });
+    </script>
+</body>
+</html>
