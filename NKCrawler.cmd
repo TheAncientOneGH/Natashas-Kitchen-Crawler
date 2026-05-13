@@ -3,7 +3,7 @@
 set /a savereq=0
 cd %~dp0
 set "applock=nkc.lock"
-set "verstr=1.0"
+set "verstr=1.1"
 TITLE NK Crawler v%verstr%
 cls
 if exist "%applock%" (
@@ -38,7 +38,7 @@ echo Please wait...
 python -m pip install --upgrade pip
 echo running > "%applock%"
 cls
-python "%~dp0nkc.py"
+python "%~dp0nkc.py" %*
 echo.
 if %savereq% == 1 (
 	python -m pip freeze --local > "%~dp0requirements.txt"

@@ -1,4 +1,4 @@
-# Natasha's Kitchen Crawler v1.0
+# Natasha's Kitchen Crawler v1.1
 
 A Python script using Selenium to crawl [natashaskitchen.com](https://natashaskitchen.com) and extract recipe data.
 
@@ -7,14 +7,18 @@ A Python script using Selenium to crawl [natashaskitchen.com](https://natashaski
 - Enjoy ad-free recipe browsing
 - Extracts recipes from `natashaskitchen.com`
 - Downloads a recipe image (250x250 or larger)
+- Great viewer performance capable of serving out thousands of recipes
 - Saves each recipe as an individual JSON file in `output/`
 - Images saved to `output/images/`
 - Automatic resume from last position if interrupted
 - Skips already collected recipes
 - Stop script via 'x' input or Ctrl+C
+- Supports `get:<url>` to manually add a recipe link
 - Supports `--fullrun` flag to start from beginning
 - `x` stops script (both crawler and viewer)
 - `reload` reloads the database for the viewer
+- Supports `--humansim` which simulates human interaction as it crawls
+- Battle-hardened with comprehensive anti-detection
 
 ## Quick Start: (Windows)
 
@@ -76,7 +80,6 @@ NatashiasKitchenCrawler/
 ├── NKViewer.cmd                # Quick start viewer batch command
 ├── LICENSE.md                  # License Information
 ├── README.md                   # This file
-├── error.log                   # Errors get written here (at least most of them - Automatically Created)
 ├── nkc.lock                    # Prevent running multiple instance crawler (Automatically Created)
 └── nkv.lock                    # Prevent running multiple instance viewer (Automatically Created)
 ```

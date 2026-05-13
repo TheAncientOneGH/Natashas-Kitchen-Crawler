@@ -3,19 +3,34 @@
 Natasha's Kitchen Crawler
 A Selenium-based web crawler to collect and view recipe data from natashaskitchen.com
 Collects: recipe name, ingredients, instructions, category, and an image
-Version: 1.0
+Version: 1.1
 Author: Doug - TheAncientOne (TheAncientOneGH)
 Github: https://github.com/TheAncientOneGH/Natashas-Kitchen-Crawler
 Donate: https://www.paypal.com/donate/?hosted_button_id=JJ2KF3GDK9C38
 """
 
 appname = "Natasha's Kitchen Crawler"
-verstr = "1.0"
+verstr = "1.1"
 appnameabbr = f"NK Crawler v{verstr}"
 domhref = "https://"
 domain = "natashaskitchen.com"
 dbase = "nk.db"
-uagent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# User-Agent pool for rotation - multiple realistic browsers
+USER_AGENTS = [
+    # Chrome Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    # Chrome macOS
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    # Firefox Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+    # Edge Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+    # Safari macOS
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+]
 
 import os
 import sys
@@ -29,9 +44,16 @@ import signal
 import argparse
 import html
 import sqlite3
+import random
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
 from pathlib import Path
+
+# File paths for data storage
+RESUME_FILE = Path("output/resume/resume.json")
+COLLECTED_FILE = Path("output/collected.json")
+IGNORE_FILE = Path("output/ignore.json")
+SKIP_FILE = Path("output/skip.json")
 
 def inPack(pack):
     try:
@@ -58,6 +80,7 @@ inPack("urllib3")
 inPack("Pillow")
 inPack("webdriver-manager")
 inPack("requests")
+inPack("undetected-chromedriver")
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -95,12 +118,43 @@ COLLECTED_DIR.mkdir(exist_ok=True)
 SKIP_DIR.mkdir(exist_ok=True)
 DEBUGEN = False
 
+# Common Accept headers
+ACCEPT_HEADERS = [
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+]
+
+# Common Accept-Language headers
+ACCEPT_LANGUAGE_HEADERS = [
+    "en-US,en;q=0.9",
+    "en-GB,en;q=0.9",
+    "en-AU,en;q=0.9",
+    "en-CA,en;q=0.9",
+]
+
+# Anti-detection settings
+# Minimum / Maximum delay between page loads (seconds)
+MIN_DELAY = 1
+MAX_DELAY = 3
+
+# Proxy configuration (optional - set to None to disable)
+# Format: "http://user:pass@host:port" or "http://host:port"
+# List of proxies to rotate, e.g., ["http://proxy1:port", "http://proxy2:port"]
+PROXY_LIST = []
+
+# Screenshot and behavior variation settings
+# Occasionally take screenshots for debugging
+ENABLE_SCREENSHOTS = False
+SCREENSHOT_PROBABILITY = 0.05
+
 class RecipeCrawler:
-    def __init__(self, full_run=False):
+    def __init__(self, full_run=False, human_sim=False):
         self.driver = None
         self.visited_urls = set()
         self.collected_recipes = {}
         self.full_run = full_run
+        self.human_sim = human_sim
         self.running = True
         self.progress = {"last_url": None, "total_collected": 0, "last_update": None}
         self.input_queue = queue.Queue()
@@ -111,6 +165,8 @@ class RecipeCrawler:
         # Seconds
         self.page_load_timeout = 20
         self.max_retries = 2
+        # Track page count for periodic behavior variation
+        self.page_count = 0
         # Load saved state
         self.load_ignorelist()
         self.load_progress()
@@ -120,6 +176,70 @@ class RecipeCrawler:
         # Setup signal handlers
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
+
+    def _get_random_headers(self, for_image=False):
+        """Generate random headers to mimic real browser requests"""
+        if for_image:
+            accept = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+        else:
+            accept = random.choice(ACCEPT_HEADERS)
+        
+        return {
+            'User-Agent': random.choice(USER_AGENTS),
+            'Accept': accept,
+            'Accept-Language': random.choice(ACCEPT_LANGUAGE_HEADERS),
+            'Accept-Encoding': random.choice([
+                'gzip, deflate, br, zstd',
+                'gzip, deflate, br',
+                'gzip, deflate'
+            ]),
+            'Cache-Control': random.choice([
+                'no-cache',
+                'max-age=0',
+                'no-store, max-age=0',
+            ]),
+            'Pragma': 'no-cache',
+            'Sec-Ch-Ua': '"Chromium";v="131", "Not_A Brand";v="24"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': random.choice(['"Windows"', '"macOS"']),
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
+        }
+
+    def _get_random_proxy(self):
+        """Return a random proxy if configured"""
+        if PROXY_LIST:
+            proxy = random.choice(PROXY_LIST)
+            return {
+                'http': proxy,
+                'https': proxy
+            }
+        return None
+
+    def _get_session_with_proxy(self):
+        """Create a requests session with optional proxy and randomized headers"""
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=random.uniform(0.5, 1.5),
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET", "HEAD"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+
+        # Add proxy if configured
+        proxy = self._get_random_proxy()
+        if proxy:
+            session.proxies.update(proxy)
+            if DEBUGEN:
+                print(f"  Debug: Using proxy: {proxy}")
+
+        return session
 
     def signal_handler(self, signum, frame):
         print("\nShutdown signal received. Saving progress...")
@@ -175,64 +295,356 @@ class RecipeCrawler:
         return should_shutdown
 
     def setup_driver(self):
-        """Initialize Selenium WebDriver with robust settings"""
-        options = webdriver.ChromeOptions()
-        options.add_argument("--headless=new")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--disable-extensions")
-        options.add_argument("--disable-plugins-discovery")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option("useAutomationExtension", False)
-        # Add user agent to appear more like a real browser
-        options.add_argument(f"--user-agent={uagent}")
+        """Initialize Selenium WebDriver with comprehensive stealth/anti-detection"""
+        print("Setting up Chrome driver...")
+        
+        # First, try the simplest possible approach
         try:
+            print("Trying simplest ChromeDriver initialization...")
+            options = webdriver.ChromeOptions()
+            options.add_argument("--headless=new")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            self.driver = webdriver.Chrome(options=options)
+            print("Simple ChromeDriver initialization successful")
+            return
+        except Exception as e:
+            print(f"Simple approach failed: {e}")
+        
+        # If that fails, try with webdriver-manager
+        try:
+            print("Trying with webdriver-manager...")
             from webdriver_manager.chrome import ChromeDriverManager
             from selenium.webdriver.chrome.service import Service
-
+            
+            options = webdriver.ChromeOptions()
+            options.add_argument("--headless=new")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            
             service = Service(ChromeDriverManager().install())
             self.driver = webdriver.Chrome(service=service, options=options)
+            print("webdriver-manager approach successful")
+            return
         except Exception as e:
-            print(f"Warning: webdriver-manager failed ({e}), trying direct Chrome...")
-            try:
-                self.driver = webdriver.Chrome(options=options)
-            except Exception as e2:
-                print(f"Error initializing Chrome driver: {e2}")
-                print("Please ensure Chrome browser is installed.")
-                sys.exit(1)
-
-        # Execute script to hide webdriver detection
-        self.driver.execute_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
-        # Set page load timeout
+            print(f"webdriver-manager approach failed: {e}")
+        
+        # If that fails, try undetected-chromedriver
+        try:
+            print("Trying undetected-chromedriver...")
+            import undetected_chromedriver as uc
+            options = uc.ChromeOptions()
+            options.add_argument("--headless=new")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            self.driver = uc.Chrome(options=options)
+            print("undetected-chromedriver approach successful")
+            return
+        except Exception as e:
+            print(f"undetected-chromedriver approach failed: {e}")
+        
+        # If all else fails, raise the error
+        raise Exception("All ChromeDriver initialization approaches failed")
+        
+        # Execute comprehensive JavaScript stealth scripts
+        self._inject_stealth_scripts()
+        
+        # Set timeouts
         self.driver.set_page_load_timeout(self.page_load_timeout)
-        # Set implicit wait
         self.driver.implicitly_wait(5)
+        
+        # Add realistic cookies before first navigation
+        self._create_realistic_cookies()
+        
+        # Randomize window size after creation
+        self._randomize_window_size()
+        
+        print(f"WebDriver initialized with anti-detection enabled")
+        print(f"User Agent: {selected_user_agent[:80]}...")
 
-    def stripClean(self, text):
-        cleaned = text.replace(" (Video Recipe) ", "")
-        cleaned = cleaned.replace(" (Video Recipe)", "")
-        cleaned = cleaned.replace("(Video Recipe) ", "")
-        cleaned = cleaned.replace("(Video Recipe)", "")
-        cleaned = cleaned.replace(" VIDEO ", "")
-        cleaned = cleaned.replace(" VIDEO", "")
-        cleaned = cleaned.replace("VIDEO ", "")
-        cleaned = cleaned.replace("VIDEO", "")
+    def _create_realistic_cookies(self):
+        """Create some realistic cookies to simulate real browser behavior"""
+        if self.driver is None:
+            return
+            
+        # Add some common cookies that real browsers have
+        base_domain = f".{domain}"
+        
+        cookies_to_add = [
+            {
+                'name': '_ga',
+                'value': f'GA1.2.{random.randint(100000000, 999999999)}.{random.randint(1000000000, 9999999999)}',
+                'domain': base_domain,
+                'path': '/'
+            },
+            {
+                'name': '_gid',
+                'value': f'GA1.2.{random.randint(100000000, 999999999)}.{int(time.time())}',
+                'domain': base_domain,
+                'path': '/'
+            },
+        ]
+        
+        for cookie in cookies_to_add:
+            try:
+                self.driver.add_cookie(cookie)
+            except Exception:
+                pass  # Ignore cookie errors
+
+    def _inject_stealth_scripts(self):
+        """Inject JavaScript to mask Selenium WebDriver detection"""
+        if self.driver is None:
+            return
+
+        stealth_js = """
+        // Overwrite the navigator.webdriver property
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined,
+        });
+
+        // Overwrite navigator.plugins with realistic data
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [
+                {
+                    0: {type: 'application/x-google-chrome-pdf'},
+                    description: 'Built-in PDF Viewer',
+                    filename: 'internal-pdf-viewer',
+                    length: 1,
+                    name: 'Chrome PDF Plugin'
+                },
+                {
+                    0: {type: 'application/pdf'},
+                    description: 'Portable Document Format',
+                    filename: 'internal-pdf-viewer',
+                    length: 1,
+                    name: 'Chrome PDF Viewer'
+                },
+                {
+                    0: {type: 'application/x-shockwave-flash'},
+                    description: 'Shockwave Flash',
+                    filename: 'internal-flash-player',
+                    length: 1,
+                    name: 'Shockwave Flash'
+                }
+            ],
+        });
+
+        // Overwrite navigator.languages
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en'],
+        });
+
+        // Create fake chrome object
+        window.chrome = {
+            runtime: {
+                ServiceWorker: {
+                    register: function() { return Promise.resolve(); }
+                }
+            }
+        };
+
+        // Overwrite permissions
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+            Promise.resolve({ state: Notification.permission }) :
+            originalQuery(parameters)
+        );
+
+        // Remove webdriver from window properties
+        delete window.webdriver;
+
+        // Overwrite plugins length
+        Object.defineProperty(navigator, 'plugins', {
+            get: function() {
+                return [
+                    {
+                        '0': 'application/x-google-chrome-pdf;version=',
+                        'description': 'Portable Document Format',
+                        'filename': 'internal-pdf-viewer',
+                        'length': 1,
+                        'name': 'Chrome PDF Plugin'
+                    },
+                    {
+                        '0': 'application/pdf;version=',
+                        'description': 'Portable Document Format',
+                        'filename': 'internal-pdf-viewer',
+                        'length': 1,
+                        'name': 'Chrome PDF Viewer'
+                    }
+                ];
+            }
+        });
+
+        // Overwrite mimeTypes
+        Object.defineProperty(navigator, 'mimeTypes', {
+            get: function() {
+                return [
+                    {
+                        '0': 'application/pdf',
+                        'type': 'application/pdf',
+                        'suffixes': 'pdf',
+                        'description': 'Portable Document Format'
+                    },
+                    {
+                        '0': 'application/x-google-chrome-pdf',
+                        'type': 'application/x-google-chrome-pdf',
+                        'suffixes': 'pdf',
+                        'description': 'Portable Document Format'
+                    }
+                ];
+            }
+        });       
+
+        // Canvas fingerprinting protection
+        const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function(type) {
+            if (type === 'image/png' || type === 'image/jpeg') {
+                const canvas = document.createElement('canvas');
+                canvas.width = this.width;
+                canvas.height = this.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(this, 0, 0);
+                return originalToDataURL.call(canvas, type);
+            }
+            return originalToDataURL.apply(this, arguments);
+        };
+
+        // WebGL fingerprinting protection
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+            if (parameter === 37445) {
+                return 'Intel Inc.';
+            }
+            if (parameter === 37446) {
+                return 'Intel Iris OpenGL Engine';
+            }
+            return getParameter.apply(this, arguments);
+        };
+        """
+
+        try:
+            self.driver.execute_script(stealth_js)
+        except Exception as e:
+            if DEBUGEN:
+                print(f"Stealth injection warning: {e}")
+
+    def _create_realistic_cookies(self):
+        """Create some realistic cookies to simulate real browser behavior"""
+        if self.driver is None:
+            return
+            
+        # Add some common cookies that real browsers have
+        base_domain = f".{domain}"
+        
+        cookies_to_add = [
+            {
+                'name': '_ga',
+                'value': f'GA1.2.{random.randint(100000000, 999999999)}.{random.randint(1000000000, 9999999999)}',
+                'domain': base_domain,
+                'path': '/'
+            },
+            {
+                'name': '_gid',
+                'value': f'GA1.2.{random.randint(100000000, 999999999)}.{int(time.time())}',
+                'domain': base_domain,
+                'path': '/'
+            },
+        ]
+        
+        for cookie in cookies_to_add:
+            try:
+                self.driver.add_cookie(cookie)
+            except Exception:
+                pass  # Ignore cookie errors
+
+    def _maybe_refresh_stealth(self):
+        """Occasionally re-inject stealth scripts to counter late-loading detection"""
+        # Re-inject every 10-20 pages randomly
+        if self.page_count > 0 and self.page_count % random.randint(10, 20) == 0:
+            self._inject_stealth_scripts()
+            if DEBUGEN:
+                print(f"  Debug: Re-injected stealth scripts (page {self.page_count})")
+
+
+    def _human_delay(self, reason=""):
+        """Generate human-like random delays"""
+        delay = random.uniform(MIN_DELAY, MAX_DELAY)
+        # Occasionally longer delays (simulating user distraction)
+        if random.random() < 0.15:  # 15% chance
+            delay += random.uniform(2, 5)
+        if reason:
+            print(f"  Delaying {delay:.2f}s: {reason}")
+        time.sleep(delay)
+
+    def _scroll_page(self):
+        """Simulate human scrolling behavior"""
+        try:
+            # Get page height
+            height = self.driver.execute_script("return document.body.scrollHeight")
+            # Random scroll positions
+            scroll_positions = sorted([random.randint(100, height) for _ in range(random.randint(1, 3))])
+            
+            for pos in scroll_positions:
+                self.driver.execute_script(f"window.scrollTo({{top: {pos}, behavior: 'smooth'}})")
+                time.sleep(random.uniform(0.5, 1.5))
+        except Exception as e:
+            if DEBUGEN:
+                print(f"  Debug: Scroll error: {e}")
+
+    def _simulate_mouse_movement(self):
+        """Simulate random mouse movements to appear human"""
+        try:
+            # Random movements across screen
+            actions = webdriver.ActionChains(self.driver)
+            for _ in range(random.randint(2, 5)):
+                x = random.randint(100, 1500)
+                y = random.randint(100, 1000)
+                actions.move_by_offset(x, y)
+                actions.pause(random.uniform(0.1, 0.3))
+            actions.perform()
+        except Exception:
+            pass  # Mouse movements not always supported
+
+    def _randomize_window_size(self):
+        """Randomly vary window size to avoid fingerprinting"""
+        try:
+            width = random.randint(1900, 1920)
+            height = random.randint(1000, 1080)
+            self.driver.set_window_size(width, height)
+        except Exception:
+            pass
+
+    def _maybe_take_screenshot(self, url):
+        """Occasionally take a screenshot for debugging"""
+        if ENABLE_SCREENSHOTS and random.random() < SCREENSHOT_PROBABILITY:
+            try:
+                safe_name = self.clean_filename(url.replace(BASE_URL, ""))
+                if not safe_name:
+                    safe_name = f"screenshot_{int(time.time())}"
+                screenshot_path = DATA_DIR / f"{safe_name}.png"
+                self.driver.save_screenshot(str(screenshot_path))
+                if DEBUGEN:
+                    print(f"  Debug: Screenshot saved to {screenshot_path}")
+            except Exception as e:
+                if DEBUGEN:
+                    print(f"  Debug: Screenshot failed: {e}")
+
+    def stripClean(self, text: str) -> str:
+        if not text:
+            return ""
+
+        cleaned = re.sub(r'[^\x00-\x7F]+', '', text)
+
+        cleaned = re.sub(
+            r"\s*\(Video Recipe\)\s*|\s*VIDEO\s*", " ", cleaned, flags=re.IGNORECASE
+        )
         cleaned = cleaned.replace(" ", "_")
-        cleaned = cleaned.replace("____", "_")
-        cleaned = cleaned.replace("___", "_")
-        cleaned = cleaned.replace("__", "_")
+        cleaned = re.sub(r"_+", "_", cleaned)
         cleaned = cleaned.replace("%", "--PCENT--")
         cleaned = cleaned.replace("&", "--AND--")
-        cleaned = re.sub(r"[()]", "", cleaned)
-        cleaned = re.sub(r'[“”,!’\'"<>:;/\\|?*]', "", cleaned)
-        cleaned = cleaned.strip("_\n")
-        cleaned = cleaned.strip("_")
-        cleaned = cleaned.strip()
+        cleaned = re.sub(r'[()“”’!\',"<>:/\\|?*\[\]]', "", cleaned)
+        cleaned = cleaned.strip("_ \n")
         return cleaned
 
     def load_progress(self):
@@ -324,6 +736,11 @@ class RecipeCrawler:
         skipped_count = 0
 
         for json_file in json_files:
+            try:
+                print(f"Importing: {json_file.name}")
+            except UnicodeEncodeError:
+                # Fallback for filenames that can't be encoded in console
+                print(f"Importing: {json_file.name.encode('ascii', 'replace').decode('ascii')}")
             # Skip files in subdirectories (resume, images, thumbs, db)
             if json_file.parent != DATA_DIR:
                 continue
@@ -348,7 +765,7 @@ class RecipeCrawler:
                     "INSERT INTO recipes (name, data, added_at) VALUES (?, ?, ?)",
                     (name, json.dumps(recipe_data), datetime.now().isoformat()),
                 )
-                print(f"Imported: {name}")
+                #print(f"Imported: {name}")
                 imported_count += 1
 
             except Exception as e:
@@ -528,7 +945,7 @@ class RecipeCrawler:
                                         ".jpeg",
                                         ".png",
                                         ".webp",
-                                        ".gif",
+                                        ".gif"
                                     ]
                                 ):
                                     candidate_urls.append(url)
@@ -557,7 +974,7 @@ class RecipeCrawler:
                                         "badge",
                                         "sprite",
                                         "svg",
-                                        "pixel",
+                                        "pixel"
                                     ]
                                 ):
                                     candidate_urls.append(src)
@@ -719,7 +1136,7 @@ class RecipeCrawler:
                         "recipeIngredient": [],
                         "recipeInstructions": [],
                         "recipeCategory": None,
-                        "recipeCuisine": None,
+                        "recipeCuisine": None
                     }
 
                     # Get recipe name
@@ -782,7 +1199,7 @@ class RecipeCrawler:
         return recipes
 
     def download_image(self, image_url, filename):
-        """Download and save recipe image (only if 250x250 or larger)"""
+        """Download and save recipe image with anti-detection measures"""
         try:
             if not image_url or not isinstance(image_url, str):
                 return None
@@ -792,14 +1209,23 @@ class RecipeCrawler:
             elif image_url.startswith("/"):
                 image_url = urljoin(BASE_URL, image_url)
 
-            session = requests.Session()
-            retry_strategy = Retry(
-                total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504]
-            )
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            headers = {"User-Agent": f"{uagent}"}
+            # Use randomized headers for each image request
+            headers = self._get_random_headers(for_image=True)
+
+            # Random referer with some variance
+            referer_options = [
+                BASE_URL,
+                BASE_URL + "/recipes",
+                BASE_URL + "/category/main-dishes",
+            ]
+            headers['Referer'] = random.choice(referer_options)
+
+            # Create session with proxy and retry support
+            session = self._get_session_with_proxy()
+
+            # Random human-like delay before image request
+            time.sleep(random.uniform(0.5, 1.5))
+
             response = session.get(image_url, headers=headers, timeout=30, stream=True)
             response.raise_for_status()
 
@@ -824,14 +1250,14 @@ class RecipeCrawler:
                     return None
 
                 # Convert to webp and resize to 785x301 for main image
-                img = img.convert("RGB")  # Ensure RGB mode for webp
-                # Use LANCZOS resampling (best quality for downscaling)
+                img = img.convert("RGB")
                 resample = (
                     PILImage.Resampling.LANCZOS
                     if hasattr(PILImage, "Resampling")
                     else 1
                 )
                 img_resized = img.resize((785, 301), resample)
+
                 # Generate webp filename
                 safe_name = os.path.splitext(filename)[0]
                 safe_name = self.stripClean(safe_name)
@@ -841,8 +1267,8 @@ class RecipeCrawler:
                 # Save resized webp image
                 img_resized.save(image_path, format="WEBP", quality=85)
                 print(f"Saved webp image to: {image_path}")
-                thumb = img.resize((267, 200), resample)
 
+                thumb = img.resize((267, 200), resample)
                 thumb_filename = f"{safe_name}.webp"
                 thumb_path = THUMBS_DIR / thumb_filename
                 thumb.save(thumb_path, format="WEBP", quality=85)
@@ -887,7 +1313,7 @@ class RecipeCrawler:
             "url": page_url,
             "image": True,
             "v": f"{verstr}",
-            "extracted_at": datetime.now().isoformat(),
+            "extracted_at": datetime.now().isoformat()
         }
 
         # Extract image URL - try JSON-LD first, then fall back to DOM extraction
@@ -920,9 +1346,7 @@ class RecipeCrawler:
             if dom_image_url:
                 _tempimage = dom_image_url
                 # recipe["image_url"] = dom_image_url
-                print(
-                    f"  Using image URL from DOM (JSON-LD image was loader/missing): {dom_image_url[:80]}..."
-                )
+                print(f"  Using image URL from DOM (JSON-LD image was loader/missing): {dom_image_url[:80]}...")
 
         ingredients = recipe_data.get("recipeIngredient")
         if ingredients is None:
@@ -984,6 +1408,21 @@ class RecipeCrawler:
 
         if not recipe_name:
             print("Warning: Recipe has no name, skipping")
+            return False
+
+        # Check if recipe with this name already exists in database
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM recipes WHERE name = ?", (recipe_name,))
+            if cursor.fetchone():
+                print(f"  Recipe already exists in database: {recipe_name}")
+                conn.close()
+                return False
+            conn.close()
+        except sqlite3.Error as e:
+            print(f"  Database error checking for existing recipe: {e}")
+            # If we can't check, let's skip to be safe
             return False
 
         display_name = self._clean_html_entities(recipe_name)
@@ -1050,6 +1489,9 @@ class RecipeCrawler:
             return links
 
         try:
+            # Simulate human reading - pause before scanning for links
+            time.sleep(random.uniform(0.5, 1.5))
+            
             all_links = self.driver.find_elements(By.TAG_NAME, "a")
             if DEBUGEN:
                 print(f"  Debug: Found {len(all_links)} total links on page")
@@ -1086,8 +1528,14 @@ class RecipeCrawler:
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
 
-            # Give extra time for JavaScript to render
-            time.sleep(2)
+            # Simulate human reading/browsing time
+            reading_delay = random.uniform(0.5, 2.0)
+            time.sleep(reading_delay)
+            
+            # Random chance to move mouse after load
+            if random.random() < 0.6:
+                self._simulate_mouse_movement()
+            
             return True
 
         except TimeoutException:
@@ -1101,10 +1549,17 @@ class RecipeCrawler:
         print("=" * 60)
         print(f"{appname} v{verstr}")
         print("=" * 60)
+
         if self.full_run:
             print("Mode: Full Run")
         else:
             print("Mode: Resume Run")
+
+        if self.human_sim:
+            print("Human Sim: On")
+        else:
+            print("Human Sim: Off")
+
         print(f"Starting URL: {BASE_URL}")
         print("Press 'x' + Enter to stop crawling")
         print("Or type 'get:<url>' to add a specific URL to the queue")
@@ -1136,13 +1591,21 @@ class RecipeCrawler:
                 if attempt > 0:
                     print(f"  Retry attempt {attempt}/{self.max_retries}")
 
+                # Human-like delay before navigation
+                if self.human_sim:
+                    self._human_delay("pre-navigation pause")
+
+                    # Sometimes simulate mouse movement before navigation
+                    if random.random() < 0.4:
+                        self._simulate_mouse_movement()
+
                 # Navigate to URL with timeout handling
                 try:
                     self.driver.get(url)
                 except Exception as e:
                     if attempt < self.max_retries:
                         print(f"  Page load failed: {e}, retrying...")
-                        time.sleep(3)
+                        time.sleep(random.uniform(2, 5))
                         continue
                     else:
                         print(
@@ -1154,7 +1617,22 @@ class RecipeCrawler:
                 # Wait for page to load properly
                 if not self.wait_for_page_load(url):
                     if attempt < self.max_retries:
+                        print(f"  Page load wait failed, retrying...")
+                        time.sleep(random.uniform(2, 5))
                         continue
+                    else:
+                        print(f"  Page load wait failed after {self.max_retries} retries")
+                        self.add_to_skiplist(url, "Page load timeout or error")
+                        return []
+
+                # Simulate human scrolling behavior after page load
+                if self.human_sim:
+                    if random.random() < 0.7:
+                        self._scroll_page()
+                        time.sleep(random.uniform(0.5, 1.5))
+
+                # Random small pause before extraction
+                time.sleep(random.uniform(0.3, 1.0))
 
                 # Debug: Print page title
                 try:
@@ -1239,10 +1717,17 @@ class RecipeCrawler:
         print("=" * 60)
         print(f"{appname} v{verstr}")
         print("=" * 60)
+
         if self.full_run:
             print("Mode: Full Run")
         else:
             print("Mode: Resume Run")
+
+        if self.human_sim:
+            print("Human Sim: On")
+        else:
+            print("Human Sim: Off")
+
         print(f"Starting URL: {BASE_URL}")
         print("Press 'x' + Enter to stop crawling")
         print("Or type 'get:<url>' to add a specific URL to the queue")
@@ -1300,6 +1785,20 @@ class RecipeCrawler:
                 print(f"\n--- Page {pages_crawled} ---")
                 new_links = self.crawl_page(current_url)
 
+                # Randomize link processing order for more human-like browsing
+                if new_links:
+                    random.shuffle(new_links)
+                    
+                    # Occasionally include some backtracking simulation
+                    if random.random() < 0.1 and len(self.crawl_queue) > 3:
+                        # Add a fake "already visited" looking URL to simulate clicking back
+                        if len(self.crawl_queue) > 0:
+                            back_url = self.crawl_queue[-1]  # Get last queued URL
+                            if back_url not in visited_this_session:
+                                new_links.insert(0, back_url)
+                                if DEBUGEN:
+                                    print(f"  Debug: Inserting backtrack candidate: {back_url[:50]}")
+
                 for link in new_links:
                     if (
                         link not in visited_this_session
@@ -1310,10 +1809,25 @@ class RecipeCrawler:
                     ):
                         self.crawl_queue.append(link)
 
-                print(
-                    f"Queue size: {len(self.crawl_queue)} | Visited: {len(self.visited_urls)} | Collected: {self.clean_collected()}"
-                )
-                time.sleep(1)
+                # Periodically refresh stealth measures
+                self._maybe_refresh_stealth()
+                
+                # Occasionally take screenshot for debugging
+                self._maybe_take_screenshot(current_url)
+
+                print(f"Queue size: {len(self.crawl_queue)} | Visited: {len(self.visited_urls)} | Collected: {self.clean_collected()}")
+                
+                # Random human-like delay between pages
+                if self.human_sim:
+                    crawl_delay = random.uniform(MIN_DELAY, MAX_DELAY)
+                    if self.page_count % 5 == 0 and self.page_count > 0:
+                        # Occasionally take a longer break (simulating user browsing other pages)
+                        crawl_delay = random.uniform(10, 20)
+                        print(f"  Taking longer break: {crawl_delay:.1f}s (simulating browsing)")
+
+                    time.sleep(crawl_delay)
+
+                self.page_count += 1
 
         except KeyboardInterrupt:
             print("\nShutdown requested. Saving progress...")
@@ -1336,18 +1850,15 @@ class RecipeCrawler:
 
 def main():
     parser = argparse.ArgumentParser(description="Crawl for recipes")
-    parser.add_argument(
-        "--fullrun",
-        action="store_true",
-        help="Start from beginning instead of resuming",
-    )
+    parser.add_argument("--fullrun", action="store_true", help="Start from beginning instead of resuming")
+    parser.add_argument("--humansim", action="store_true", help="Use simulated browsing and delay")
     args = parser.parse_args()
     checkResume = Path("output/resume/resume.json")
 
     if not args.fullrun and not checkResume.is_file():
         args.fullrun = True
 
-    crawler = RecipeCrawler(full_run=args.fullrun)
+    crawler = RecipeCrawler(full_run=args.fullrun, human_sim=args.humansim)
 
     try:
         crawler.start_crawl()

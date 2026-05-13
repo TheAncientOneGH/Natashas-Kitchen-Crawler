@@ -3,20 +3,21 @@
 Natasha's Kitchen Viewer
 A lightweight Python web app to display Natasha's Kitchen collected recipes.
 Serves a single-page HTML/JS frontend with live updates and search.
-Version: 1.0
+Version: 1.1
 Author: Doug - TheAncientOne (TheAncientOneGH)
 Github: https://github.com/TheAncientOneGH/Natashas-Kitchen-Crawler
 Donate: https://www.paypal.com/donate/?hosted_button_id=JJ2KF3GDK9C38
 """
 
 appname = "Natasha's Kitchen Viewer"
-verstr = "1.0"
+verstr = "1.1"
 domhref = "https://"
 domain = "natashaskitchen.com"
 dbase = "nk.db"
 
 import http.server
 import socketserver
+import socket
 import json
 import os
 import re
@@ -25,15 +26,20 @@ import urllib.parse
 from pathlib import Path
 import threading
 import sqlite3
-import logging
+import socket
 
-logging.basicConfig(filename="error.log", level=logging.DEBUG, format="%(message)s")
+def get_random_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
+
 # Configuration
 # Current directory (contains 'output' subfolder)
 DATA_DIR = Path(".")
 DB_PATH = DATA_DIR / "output" / "db" / dbase
+# Set to "0.0.0.0" to bind all including WanIP (NOT RECOMMENDED)
 IP = "localhost"
-PORT = 12458
+PORT = get_random_port()
 
 # Cached database connection and recipes for performance
 _db_connection = None
@@ -58,26 +64,21 @@ def get_db_connection():
         _db_connection.row_factory = sqlite3.Row
     return _db_connection
 
-def stripClean(text):
-    cleaned = text.replace(" (Video Recipe) ", "")
-    cleaned = cleaned.replace(" (Video Recipe)", "")
-    cleaned = cleaned.replace("(Video Recipe) ", "")
-    cleaned = cleaned.replace("(Video Recipe)", "")
-    cleaned = cleaned.replace(" VIDEO ", "")
-    cleaned = cleaned.replace(" VIDEO", "")
-    cleaned = cleaned.replace("VIDEO ", "")
-    cleaned = cleaned.replace("VIDEO", "")
+def stripClean(text: str) -> str:
+    if not text:
+        return ""
+
+    cleaned = re.sub(r'[^\x00-\x7F]+', '', text)
+
+    cleaned = re.sub(
+        r"\s*\(Video Recipe\)\s*|\s*VIDEO\s*", " ", cleaned, flags=re.IGNORECASE
+    )
     cleaned = cleaned.replace(" ", "_")
-    cleaned = cleaned.replace("____", "_")
-    cleaned = cleaned.replace("___", "_")
-    cleaned = cleaned.replace("__", "_")
+    cleaned = re.sub(r"_+", "_", cleaned)
     cleaned = cleaned.replace("%", "--PCENT--")
     cleaned = cleaned.replace("&", "--AND--")
-    cleaned = re.sub(r"[()]", "", cleaned)
-    cleaned = re.sub(r'[“”,!’\'"<>:;/\\|?*]', "", cleaned)
-    cleaned = cleaned.strip("_\n")
-    cleaned = cleaned.strip("_")
-    cleaned = cleaned.strip()
+    cleaned = re.sub(r'[()“”’!\',"<>:/\\|?*\[\]]', "", cleaned)
+    cleaned = cleaned.strip("_ \n")
     return cleaned
 
 def load_all_recipes():
@@ -139,7 +140,6 @@ def load_all_recipes():
                 recipes.append(recipe_data)
             except Exception as e:
                 print(f"Error loading recipe row: {e}")
-                logging.debug(f"Row: {row}")
 
     except Exception as e:
         print(f"Database error: {e}")
@@ -376,7 +376,10 @@ def main():
         exit_thread = threading.Thread(target=wait_for_exit, args=(httpd,), daemon=True)
         exit_thread.start()
         try:
-            webbrowser.open(f"http://{IP}:{PORT}")
+            if IP == "" or IP == "0.0.0.0":
+                webbrowser.open(f"http://127.0.0.1:{PORT}")
+            else:
+                webbrowser.open(f"http://{IP}:{PORT}")
             httpd.serve_forever()
         except KeyboardInterrupt:
             print("\nServer stopped.")

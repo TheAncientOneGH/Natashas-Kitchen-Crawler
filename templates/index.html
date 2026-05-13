@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/png" href="templates/noodles.png">
-    <title>Natasha's Kitchen v.1.0</title>
+    <title>Natasha's Kitchen v.1.1</title>
     <style>
         :root {
             --primary: #b30000;
@@ -14,6 +14,7 @@
             --text: #000000;
             --accent: #ff0000;
         }
+
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
@@ -466,7 +467,7 @@
             if (scrollTimeout) {
                 clearTimeout(scrollTimeout);
             }
-            scrollTimeout = setTimeout(handleScroll, 50);  // Check every 50ms max
+            scrollTimeout = setTimeout(handleScroll, 50);
         });
 
         // Load initial recipes or apply search
@@ -580,8 +581,13 @@
             const card = document.createElement('div');
             card.className = 'recipe-card';
             card.onclick = () => openRecipe(index);
+            let imgSrc = 'templates/noimage.jpg';
 
-            let imgSrc = (r.name && r.name !== 'null' && r.name !== 'None') ? 'output/thumbs/' + stripClean(r.name) : 'templates/noimage.jpg';
+            console.log(JSON.stringify(r));
+
+            if (r.image) {
+                imgSrc = 'output/thumbs/' + stripClean(r.name) + '.webp';
+            }
 
             // Ensure origin is not null
             if (r.origin === null) r.origin = "";
@@ -589,7 +595,7 @@
             const preview = (r.instructions && r.instructions[0]) || '';
 
             card.innerHTML = `
-                <img class="recipe-img" src="${stripClean(imgSrc)}.webp" alt="${r.name}" loading="lazy">
+                <img class="recipe-img" src="${imgSrc}" alt="${r.name}" loading="lazy">
                 <div class="recipe-info">
                     <h3 class="recipe-title">${r.name}</h3>
                     <p class="recipe-preview">${preview}</p>
@@ -622,7 +628,8 @@
             document.getElementById('modalCat').textContent = currentRecipe.category;
 
             const modalImg = document.getElementById('modalImg');
-            if (currentRecipe.image === null || currentRecipe.image === 'output/images/null' || currentRecipe.image === 'output/images/None') {
+            if (!currentRecipe.image || currentRecipe.image === null || currentRecipe.image === 'output/images/null' || currentRecipe.image === 'output/images/None') 
+            {
                 modalImg.src = 'templates/noimage.jpg';
             } else {
                 modalImg.src = 'output/images/' + stripClean(currentRecipe.name) + ".webp";

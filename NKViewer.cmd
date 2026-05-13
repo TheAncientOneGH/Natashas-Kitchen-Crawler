@@ -3,7 +3,7 @@
 set /a savereq=0
 cd %~dp0
 set "applock=nkv.lock"
-set "verstr=1.0"
+set "verstr=1.1"
 TITLE NK Viewer v%verstr%
 cls
 if exist "%applock%" (
